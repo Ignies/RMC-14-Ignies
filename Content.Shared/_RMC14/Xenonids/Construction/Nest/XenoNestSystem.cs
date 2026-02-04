@@ -104,7 +104,7 @@ public sealed class XenoNestSystem : EntitySystem
         SubscribeLocalEvent<XenoNestedComponent, PreventCollideEvent>(OnNestedPreventCollide);
         SubscribeLocalEvent<XenoNestedComponent, PullAttemptEvent>(OnNestedPullAttempt);
         SubscribeLocalEvent<XenoNestedComponent, InteractionAttemptEvent>(OnNestedInteractionAttempt);
-        SubscribeLocalEvent<XenoNestedComponent, UpdateCanMoveEvent>(OnNestedUpdateCanMove);
+        SubscribeLocalEvent<XenoNestedComponent, UpdateCanMoveEvent>(OnNestedCancel);
         SubscribeLocalEvent<XenoNestedComponent, UseAttemptEvent>(OnNestedCancel);
         SubscribeLocalEvent<XenoNestedComponent, ThrowAttemptEvent>(OnNestedCancel);
         SubscribeLocalEvent<XenoNestedComponent, PickupAttemptEvent>(OnNestedCancel);
@@ -335,13 +335,6 @@ public sealed class XenoNestSystem : EntitySystem
     private void OnNestedInteractionAttempt(Entity<XenoNestedComponent> ent, ref InteractionAttemptEvent args)
     {
         args.Cancelled = true;
-    }
-
-    private void OnNestedUpdateCanMove(Entity<XenoNestedComponent> ent, ref UpdateCanMoveEvent args)
-    {
-        // Allow movement if trying to break out, but cancel otherwise
-        if (!ent.Comp.IsBreakingOut)
-            args.Cancel();
     }
 
     private void OnNestedCancel<T>(Entity<XenoNestedComponent> ent, ref T args) where T : CancellableEntityEventArgs
@@ -717,6 +710,13 @@ public sealed class XenoNestSystem : EntitySystem
 
         // Remove the nested component to free the marine
         DetachNested(ent.Comp.Nest, ent);
+
+        // Apply a 2-second stun after breaking out
+        if (_net.IsServer)
+        {
+            var stunTime = TimeSpan.FromSeconds(2);
+            _stun.TryParalyze(ent, stunTime, true);
+        }
     }
 
     public bool TryStartBreakout(Entity<XenoNestedComponent> ent)
