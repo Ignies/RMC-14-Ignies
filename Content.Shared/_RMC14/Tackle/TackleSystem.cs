@@ -1,6 +1,7 @@
 using Content.Shared._RMC14.Hands;
 using Content.Shared._RMC14.Marines.Skills;
 using Content.Shared._RMC14.Pulling;
+using Content.Shared._RMC14.Xenonids.Construction.Nest;
 using Content.Shared._RMC14.Xenonids.Parasite;
 using Content.Shared.Administration.Logs;
 using Content.Shared.Buckle.Components;
@@ -40,6 +41,7 @@ public sealed class TackleSystem : EntitySystem
     [Dependency] private readonly SharedHandsSystem _hands = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
     [Dependency] private readonly SharedGunSystem _gunSystem = default!;
+    [Dependency] private readonly XenoNestSystem _xenoNest = default!;
 
     private readonly List<EntityUid> _trackersToRemove = new();
 
@@ -119,6 +121,12 @@ public sealed class TackleSystem : EntitySystem
         }
 
         _audio.PlayPvs(target.Comp.KnockdownSound, target);
+
+        // If the target is nested and breaking out, cancel it and apply stun
+        if (TryComp<XenoNestedComponent>(target, out var nested) && nested.IsBreakingOut)
+        {
+            _xenoNest.CancelBreakout((target, nested), stun: true);
+        }
 
         if (!HasComp<VictimInfectedComponent>(target))
         {

@@ -1,10 +1,13 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
+using Content.Shared._RMC14.Areas;
 using Content.Shared._RMC14.Chat;
 using Content.Shared._RMC14.Ghost;
 using Content.Shared._RMC14.Inventory;
 using Content.Shared._RMC14.Map;
+using Content.Shared._RMC14.Marines.Skills;
 using Content.Shared._RMC14.Weapons.Melee;
+using Content.Shared._RMC14.Xenonids.Announce;
 using Content.Shared._RMC14.Xenonids.Hive;
 using Content.Shared._RMC14.Xenonids.Parasite;
 using Content.Shared._RMC14.Xenonids.Weeds;
@@ -44,6 +47,7 @@ public sealed class XenoNestSystem : EntitySystem
 {
     [Dependency] private readonly ActionBlockerSystem _actionBlocker = default!;
     [Dependency] private readonly ISharedAdminLogManager _adminLog = default!;
+    [Dependency] private readonly AreaSystem _areas = default!;
     [Dependency] private readonly SharedDoAfterSystem _doAfter = default!;
     [Dependency] private readonly SharedGhostSystem _ghost = default!;
     [Dependency] private readonly MobStateSystem _mobState = default!;
@@ -61,6 +65,8 @@ public sealed class XenoNestSystem : EntitySystem
     [Dependency] private readonly SharedTransformSystem _transform = default!;
     [Dependency] private readonly TurfSystem _turf = default!;
     [Dependency] private readonly SharedXenoWeedsSystem _xenoWeeds = default!;
+    [Dependency] private readonly SkillsSystem _skills = default!;
+    [Dependency] private readonly SharedXenoAnnounceSystem _xenoAnnounce = default!;
 
     private EntityQuery<OccluderComponent> _occluderQuery;
     private EntityQuery<XenoNestComponent> _xenoNestQuery;
@@ -98,7 +104,7 @@ public sealed class XenoNestSystem : EntitySystem
         SubscribeLocalEvent<XenoNestedComponent, PreventCollideEvent>(OnNestedPreventCollide);
         SubscribeLocalEvent<XenoNestedComponent, PullAttemptEvent>(OnNestedPullAttempt);
         SubscribeLocalEvent<XenoNestedComponent, InteractionAttemptEvent>(OnNestedInteractionAttempt);
-        SubscribeLocalEvent<XenoNestedComponent, UpdateCanMoveEvent>(OnNestedCancel);
+        SubscribeLocalEvent<XenoNestedComponent, UpdateCanMoveEvent>(OnNestedUpdateCanMove);
         SubscribeLocalEvent<XenoNestedComponent, UseAttemptEvent>(OnNestedCancel);
         SubscribeLocalEvent<XenoNestedComponent, ThrowAttemptEvent>(OnNestedCancel);
         SubscribeLocalEvent<XenoNestedComponent, PickupAttemptEvent>(OnNestedCancel);
@@ -108,6 +114,9 @@ public sealed class XenoNestSystem : EntitySystem
         SubscribeLocalEvent<XenoNestedComponent, IsEquippingAttemptEvent>(OnNestedCancel);
         SubscribeLocalEvent<XenoNestedComponent, IsUnequippingAttemptEvent>(OnNestedCancel);
         SubscribeLocalEvent<XenoNestedComponent, GetInfectedIncubationMultiplierEvent>(OnInNestGetInfectedIncubationMultiplier);
+        SubscribeLocalEvent<XenoNestedComponent, XenoNestBreakoutDoAfterEvent>(OnNestedBreakoutDoAfter);
+        SubscribeLocalEvent<XenoNestedComponent, DoAfterAttemptEvent<XenoNestBreakoutDoAfterEvent>>(OnNestedBreakoutDoAfterAttempt);
+        SubscribeLocalEvent<XenoNestedComponent, MoveInputEvent>(OnNestedMoveInput);
     }
 
     private void OnXenoGetUsedEntity(Entity<XenoComponent> ent, ref GetUsedEntityEvent args)
@@ -326,6 +335,13 @@ public sealed class XenoNestSystem : EntitySystem
     private void OnNestedInteractionAttempt(Entity<XenoNestedComponent> ent, ref InteractionAttemptEvent args)
     {
         args.Cancelled = true;
+    }
+
+    private void OnNestedUpdateCanMove(Entity<XenoNestedComponent> ent, ref UpdateCanMoveEvent args)
+    {
+        // Allow movement if trying to break out, but cancel otherwise
+        if (!ent.Comp.IsBreakingOut)
+            args.Cancel();
     }
 
     private void OnNestedCancel<T>(Entity<XenoNestedComponent> ent, ref T args) where T : CancellableEntityEventArgs
@@ -648,6 +664,140 @@ public sealed class XenoNestSystem : EntitySystem
         }
 
         return false;
+    }
+
+    private void OnNestedBreakoutDoAfterAttempt(Entity<XenoNestedComponent> ent, ref DoAfterAttemptEvent<XenoNestBreakoutDoAfterEvent> args)
+    {
+        // Check if entity is still nested
+        if (ent.Comp.Detached || TerminatingOrDeleted(ent))
+        {
+            args.Cancel();
+        }
+    }
+
+    private void OnNestedMoveInput(Entity<XenoNestedComponent> ent, ref MoveInputEvent args)
+    {
+        // If the marine tries to move and isn't already breaking out, start the breakout
+        if (!ent.Comp.IsBreakingOut && !HasComp<XenoComponent>(ent))
+        {
+            TryStartBreakout(ent);
+        }
+    }
+
+    private void OnNestedBreakoutDoAfter(Entity<XenoNestedComponent> ent, ref XenoNestBreakoutDoAfterEvent args)
+    {
+        ent.Comp.IsBreakingOut = false;
+        ent.Comp.BreakoutDoAfterId = null;
+        Dirty(ent);
+
+        if (args.Cancelled)
+        {
+            _popup.PopupClient(Loc.GetString("cm-xeno-nest-breakout-cancelled"), ent, ent);
+            _adminLog.Add(LogType.RMCXenoNest, $"{ToPrettyString(ent):entity} stopped breaking out of nest");
+            return;
+        }
+
+        if (args.Handled)
+            return;
+
+        args.Handled = true;
+
+        // Successfully broke out
+        _popup.PopupClient(Loc.GetString("cm-xeno-nest-breakout-success-self"), ent, ent);
+
+        foreach (var session in Filter.PvsExcept(ent).Recipients)
+        {
+            if (session.AttachedEntity is not { } recipient)
+                continue;
+
+            _popup.PopupEntity(Loc.GetString("cm-xeno-nest-breakout-success-observer", ("target", ent)), ent, recipient);
+        }
+
+        _adminLog.Add(LogType.RMCXenoNest, $"{ToPrettyString(ent):entity} broke out of nest");
+
+        // Remove the nested component to free the marine
+        DetachNested(ent.Comp.Nest, ent);
+    }
+
+    public bool TryStartBreakout(Entity<XenoNestedComponent> ent)
+    {
+        // Don't allow xenos or already breaking out entities
+        if (HasComp<XenoComponent>(ent) || 
+            ent.Comp.IsBreakingOut || 
+            ent.Comp.Detached ||
+            TerminatingOrDeleted(ent))
+        {
+            return false;
+        }
+
+        // Check if the entity has Endurance skill level 2 or higher
+        if (!_skills.HasSkill(ent, "RMCSkillEndurance", 2))
+        {
+            _popup.PopupClient(Loc.GetString("cm-xeno-nest-breakout-insufficient-endurance"), ent, ent, PopupType.MediumCaution);
+            return false;
+        }
+
+        var ev = new XenoNestBreakoutDoAfterEvent();
+        var doAfter = new DoAfterArgs(EntityManager, ent, ent.Comp.BreakoutTime, ev, ent)
+        {
+            BreakOnMove = true,
+            AttemptFrequency = AttemptFrequency.EveryTick,
+            BlockDuplicate = true,
+        };
+
+        if (!_doAfter.TryStartDoAfter(doAfter, out var doAfterId))
+            return false;
+
+        ent.Comp.IsBreakingOut = true;
+        ent.Comp.BreakoutDoAfterId = doAfterId;
+        Dirty(ent);
+
+        _popup.PopupClient(Loc.GetString("cm-xeno-nest-breakout-start-self"), ent, ent);
+
+        foreach (var session in Filter.PvsExcept(ent).Recipients)
+        {
+            if (session.AttachedEntity is not { } recipient)
+                continue;
+
+            _popup.PopupEntity(Loc.GetString("cm-xeno-nest-breakout-start-observer", ("target", ent)), ent, recipient, PopupType.Medium);
+        }
+
+        // Announce to the hive that a host is breaking out
+        if (_xenoNestQuery.TryComp(ent.Comp.Nest, out var nestComp) &&
+            TryComp(nestComp.Surface, out HiveMemberComponent? hiveMember))
+        {
+            var locationName = "Unknown";
+            if (_areas.TryGetArea(ent, out _, out var areaProto))
+                locationName = areaProto.Name;
+
+            _xenoAnnounce.AnnounceSameHiveDefaultSound(
+                (nestComp.Surface.Value, hiveMember),
+                Loc.GetString("cm-xeno-nest-breakout-hive-alert", ("location", locationName)),
+                color: Color.FromHex("#ff4444")
+            );
+        }
+
+        _adminLog.Add(LogType.RMCXenoNest, $"{ToPrettyString(ent):entity} started breaking out of nest");
+        return true;
+    }
+
+    public void CancelBreakout(Entity<XenoNestedComponent> ent, bool stun = false)
+    {
+        if (!ent.Comp.IsBreakingOut || ent.Comp.BreakoutDoAfterId == null)
+            return;
+
+        _doAfter.Cancel(ent.Comp.BreakoutDoAfterId.Value);
+        ent.Comp.IsBreakingOut = false;
+        ent.Comp.BreakoutDoAfterId = null;
+        Dirty(ent);
+
+        if (stun && _net.IsServer)
+        {
+            // Apply a stun when breakout is interrupted by tackle
+            var stunTime = TimeSpan.FromSeconds(3);
+            _stun.TryParalyze(ent, stunTime, true);
+            _popup.PopupEntity(Loc.GetString("cm-xeno-nest-breakout-interrupted"), ent, ent, PopupType.MediumCaution);
+        }
     }
 
     public override void Update(float frameTime)

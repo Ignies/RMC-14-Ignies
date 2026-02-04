@@ -1,4 +1,5 @@
-﻿using Robust.Shared.GameStates;
+﻿using Content.Shared.DoAfter;
+using Robust.Shared.GameStates;
 using Robust.Shared.Network;
 
 namespace Content.Shared._RMC14.Xenonids.Construction.Nest;
@@ -18,4 +19,13 @@ public sealed partial class XenoNestedComponent : Component
 
     [DataField, AutoNetworkedField]
     public NetUserId? GhostedId;
+
+    [DataField]
+    public TimeSpan BreakoutTime = TimeSpan.FromMinutes(2);
+
+    [DataField, AutoNetworkedField]
+    public DoAfterId? BreakoutDoAfterId;
+
+    [DataField, AutoNetworkedField]
+    public bool IsBreakingOut;
 }
