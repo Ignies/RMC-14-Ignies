@@ -660,7 +660,7 @@ public sealed class XenoNestSystem : EntitySystem
         if (args.Cancelled || args.Handled || ent.Comp.Detached)
         {
             if (args.Cancelled && !ent.Comp.Detached)
-                _popup.PopupClient(Loc.GetString("rmc-xeno-nest-helper-escape-fail-self", ("target", ent.Owner)), ent.Owner, args.User, PopupType.SmallCaution);
+                _popup.PopupClient(Loc.GetString("rmc-xeno-nest-helper-escape-fail-self", ("target", ent.Owner)), args.User, args.User, PopupType.SmallCaution);
             return;
         }
 
