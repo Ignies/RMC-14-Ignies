@@ -18,4 +18,28 @@ public sealed partial class XenoNestedComponent : Component
 
     [DataField, AutoNetworkedField]
     public NetUserId? GhostedId;
+
+    /// <summary>
+    ///     Whether the incubation multiplier is active. Always true while nested.
+    /// </summary>
+    [DataField, AutoNetworkedField]
+    public bool Running = true;
+
+    /// <summary>
+    ///     How long it takes the nested entity to break free on their own.
+    /// </summary>
+    [DataField]
+    public TimeSpan EscapeDelay = TimeSpan.FromSeconds(45);
+
+    /// <summary>
+    ///     Whether a self-escape attempt is currently in progress.
+    /// </summary>
+    [DataField, AutoNetworkedField]
+    public bool BreakingFree;
+
+    /// <summary>
+    ///     How long it takes a helper (non-xeno) to free a nested entity.
+    /// </summary>
+    [DataField]
+    public TimeSpan HelperEscapeDelay = TimeSpan.FromSeconds(15);
 }
