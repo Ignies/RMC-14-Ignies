@@ -25,3 +25,12 @@ rmc-xeno-infection-burst-now-victim = You feel something ripping up your insides
 rmc-xeno-infection-burst-now-xeno = We start bursting out of {THE($victim)}'s chest!
 
 rmc-xeno-infected-bursted = {CAPITALIZE(SUBJECT($victim))} {CONJUGATE-HAVE($victim)} a giant hole in {POSS-ADJ($victim)} chest!
+
+rmc-hugger-knife-removal-target-not-down = {CAPITALIZE($target)} needs to be on the ground for you to safely cut the hugger off!
+rmc-hugger-knife-removal-start = You begin carefully cutting the hugger from {$target}'s face...
+rmc-hugger-knife-removal-start-target = {$user} begins carefully cutting the hugger from your face!
+rmc-hugger-knife-removal-fail = You fail to remove the hugger in time.
+rmc-hugger-knife-removal-success-no-infect = You cut the hugger off {$target}'s face before it could implant! Their face is bleeding.
+rmc-hugger-knife-removal-success-no-infect-target = The hugger is cut from your face! You feel a sharp sting where the blade slipped.
+rmc-hugger-knife-removal-success-already-infected = You cut the hugger off {$target}'s face, but the embryo was already implanted. {CAPITALIZE($target)} needs surgery!
+rmc-hugger-knife-removal-success-already-infected-target = The hugger is cut from your face, but something still writhes inside you. You need surgery!

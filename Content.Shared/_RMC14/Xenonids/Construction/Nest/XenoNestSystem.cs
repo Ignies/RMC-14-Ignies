@@ -108,6 +108,13 @@ public sealed class XenoNestSystem : EntitySystem
         SubscribeLocalEvent<XenoNestedComponent, IsEquippingAttemptEvent>(OnNestedCancel);
         SubscribeLocalEvent<XenoNestedComponent, IsUnequippingAttemptEvent>(OnNestedCancel);
         SubscribeLocalEvent<XenoNestedComponent, GetInfectedIncubationMultiplierEvent>(OnInNestGetInfectedIncubationMultiplier);
+
+        SubscribeLocalEvent<XenoNestedComponent, MoveInputEvent>(OnNestedMoveInput);
+        SubscribeLocalEvent<XenoNestedComponent, DoAfterAttemptEvent<XenoNestEscapeDoAfterEvent>>(OnNestedEscapeDoAfterAttempt);
+        SubscribeLocalEvent<XenoNestedComponent, XenoNestEscapeDoAfterEvent>(OnNestedEscapeDoAfter);
+        SubscribeLocalEvent<XenoNestedComponent, InteractHandEvent>(OnNestedInteractHand);
+        SubscribeLocalEvent<XenoNestedComponent, DoAfterAttemptEvent<XenoNestHelperEscapeDoAfterEvent>>(OnNestedHelperEscapeDoAfterAttempt);
+        SubscribeLocalEvent<XenoNestedComponent, XenoNestHelperEscapeDoAfterEvent>(OnNestedHelperEscapeDoAfter);
     }
 
     private void OnXenoGetUsedEntity(Entity<XenoComponent> ent, ref GetUsedEntityEvent args)
@@ -555,6 +562,134 @@ public sealed class XenoNestSystem : EntitySystem
             return _xenoWeeds.IsOnHiveWeeds((gridEntity, gridComp), underNestCooords);
         }
 
+    }
+
+    private void OnNestedMoveInput(Entity<XenoNestedComponent> ent, ref MoveInputEvent args)
+    {
+        if (!args.HasDirectionalMovement || ent.Comp.BreakingFree || ent.Comp.Detached)
+            return;
+
+        // Cannot self-escape while paralysed (e.g. fresh hugger on face)
+        if (HasComp<StunnedComponent>(ent))
+            return;
+
+        // Cannot self-escape at advanced infection stages (body too weak)
+        if (TryComp<VictimInfectedComponent>(ent, out var infected) && infected.CurrentStage >= 3)
+        {
+            _popup.PopupClient(Loc.GetString("rmc-xeno-nest-escape-too-infected"), ent, ent, PopupType.SmallCaution);
+            return;
+        }
+
+        var ev = new XenoNestEscapeDoAfterEvent();
+        var doAfter = new DoAfterArgs(EntityManager, ent, ent.Comp.EscapeDelay, ev, ent)
+        {
+            BlockDuplicate = true,
+            DuplicateCondition = DuplicateConditions.SameEvent,
+        };
+
+        if (!_doAfter.TryStartDoAfter(doAfter))
+            return;
+
+        ent.Comp.BreakingFree = true;
+        Dirty(ent);
+
+        _popup.PopupClient(Loc.GetString("rmc-xeno-nest-escape-start-self"), ent, ent, PopupType.MediumCaution);
+    }
+
+    private void OnNestedEscapeDoAfterAttempt(Entity<XenoNestedComponent> ent, ref DoAfterAttemptEvent<XenoNestEscapeDoAfterEvent> args)
+    {
+        if (ent.Comp.Detached)
+            args.Cancel();
+    }
+
+    private void OnNestedEscapeDoAfter(Entity<XenoNestedComponent> ent, ref XenoNestEscapeDoAfterEvent args)
+    {
+        ent.Comp.BreakingFree = false;
+        Dirty(ent);
+
+        if (args.Cancelled || args.Handled || ent.Comp.Detached)
+        {
+            if (args.Cancelled && !ent.Comp.Detached)
+                _popup.PopupClient(Loc.GetString("rmc-xeno-nest-escape-fail-self"), ent, ent, PopupType.SmallCaution);
+            return;
+        }
+
+        args.Handled = true;
+
+        if (_net.IsServer)
+            NotifyNearbyXenosNestDisturbed(ent.Owner);
+
+        _popup.PopupEntity(Loc.GetString("rmc-xeno-nest-escape-success-self"), ent, ent, PopupType.Medium);
+        DetachNested(null, ent);
+    }
+
+    private void OnNestedInteractHand(Entity<XenoNestedComponent> ent, ref InteractHandEvent args)
+    {
+        var user = args.User;
+
+        // Only non-xenos can help free a nested entity
+        if (HasComp<XenoComponent>(user) || user == ent.Owner || ent.Comp.Detached)
+            return;
+
+        args.Handled = true;
+
+        var ev = new XenoNestHelperEscapeDoAfterEvent();
+        var doAfter = new DoAfterArgs(EntityManager, user, ent.Comp.HelperEscapeDelay, ev, ent)
+        {
+            BreakOnMove = true,
+            AttemptFrequency = AttemptFrequency.EveryTick,
+            BlockDuplicate = true,
+            DuplicateCondition = DuplicateConditions.SameEvent,
+        };
+
+        if (!_doAfter.TryStartDoAfter(doAfter))
+            return;
+
+        _popup.PopupClient(Loc.GetString("rmc-xeno-nest-helper-escape-start-self", ("target", ent.Owner)), user, user, PopupType.Medium);
+        _popup.PopupEntity(Loc.GetString("rmc-xeno-nest-helper-escape-start-target", ("user", user)), user, ent.Owner, PopupType.Medium);
+    }
+
+    private void OnNestedHelperEscapeDoAfterAttempt(Entity<XenoNestedComponent> ent, ref DoAfterAttemptEvent<XenoNestHelperEscapeDoAfterEvent> args)
+    {
+        if (ent.Comp.Detached)
+            args.Cancel();
+    }
+
+    private void OnNestedHelperEscapeDoAfter(Entity<XenoNestedComponent> ent, ref XenoNestHelperEscapeDoAfterEvent args)
+    {
+        if (args.Cancelled || args.Handled || ent.Comp.Detached)
+        {
+            if (args.Cancelled && !ent.Comp.Detached)
+                _popup.PopupClient(Loc.GetString("rmc-xeno-nest-helper-escape-fail-self", ("target", ent.Owner)), args.User, args.User, PopupType.SmallCaution);
+            return;
+        }
+
+        args.Handled = true;
+
+        var user = args.User;
+
+        _popup.PopupClient(Loc.GetString("rmc-xeno-nest-helper-escape-success-self", ("target", ent.Owner)), user, user, PopupType.Medium);
+        _popup.PopupEntity(Loc.GetString("rmc-xeno-nest-helper-escape-success-target", ("user", user)), user, ent.Owner, PopupType.Medium);
+
+        if (_net.IsServer)
+            NotifyNearbyXenosNestDisturbed(ent.Owner, user);
+
+        DetachNested(null, ent);
+    }
+
+    private void NotifyNearbyXenosNestDisturbed(EntityUid nestedEntity, EntityUid? excludePlayer = null)
+    {
+        foreach (var session in Filter.PvsExcept(nestedEntity).Recipients)
+        {
+            if (session.AttachedEntity is not { } recipient ||
+                recipient == excludePlayer ||
+                !HasComp<XenoComponent>(recipient))
+            {
+                continue;
+            }
+
+            _popup.PopupEntity(Loc.GetString("rmc-xeno-nest-escape-xeno-alert"), nestedEntity, recipient, PopupType.SmallCaution);
+        }
     }
 
     private void DetachNested(EntityUid? nest, EntityUid? nestedNullable)

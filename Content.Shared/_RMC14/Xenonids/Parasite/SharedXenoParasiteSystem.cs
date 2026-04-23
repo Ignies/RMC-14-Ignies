@@ -30,6 +30,7 @@ using Content.Shared.Interaction.Components;
 using Content.Shared.Inventory;
 using Content.Shared.Item;
 using Content.Shared.Jittering;
+using Content.Shared.Kitchen.Components;
 using Content.Shared.Mobs;
 using Content.Shared.Mobs.Components;
 using Content.Shared.Mobs.Systems;
@@ -93,6 +94,9 @@ public abstract partial class SharedXenoParasiteSystem : EntitySystem
     {
         SubscribeLocalEvent<InfectableComponent, ActivateInWorldEvent>(OnInfectableActivate);
         SubscribeLocalEvent<InfectableComponent, CanDropTargetEvent>(OnInfectableCanDropTarget);
+        SubscribeLocalEvent<InfectableComponent, InteractUsingEvent>(OnInfectableInteractUsing);
+        SubscribeLocalEvent<InfectableComponent, DoAfterAttemptEvent<HuggerKnifeRemovalDoAfterEvent>>(OnHuggerKnifeRemovalDoAfterAttempt);
+        SubscribeLocalEvent<InfectableComponent, HuggerKnifeRemovalDoAfterEvent>(OnHuggerKnifeRemovalDoAfter);
 
         SubscribeLocalEvent<XenoParasiteComponent, XenoLeapHitEvent>(OnParasiteLeapHit);
         SubscribeLocalEvent<XenoParasiteComponent, AfterInteractEvent>(OnParasiteAfterInteract);
@@ -153,6 +157,105 @@ public abstract partial class SharedXenoParasiteSystem : EntitySystem
             args.Handled = true;
         }
     }
+
+    private void OnInfectableInteractUsing(Entity<InfectableComponent> ent, ref InteractUsingEvent args)
+    {
+        if (args.Handled || args.User == ent.Owner)
+            return;
+
+        // Must be using a sharp item (knife, scalpel, etc.)
+        if (!HasComp<SharpComponent>(args.Used))
+            return;
+
+        // Hugger must currently be attached
+        if (!ent.Comp.BeingInfected)
+            return;
+
+        // Victim must be downed to safely attempt removal
+        if (!_standing.IsDown(ent))
+        {
+            _popup.PopupClient(Loc.GetString("rmc-hugger-knife-removal-target-not-down", ("target", ent.Owner)), ent, args.User, PopupType.SmallCaution);
+            return;
+        }
+
+        args.Handled = true;
+
+        var ev = new HuggerKnifeRemovalDoAfterEvent();
+        var doAfter = new DoAfterArgs(EntityManager, args.User, TimeSpan.FromSeconds(5), ev, ent)
+        {
+            BreakOnMove = true,
+            AttemptFrequency = AttemptFrequency.EveryTick,
+            BlockDuplicate = true,
+            DuplicateCondition = DuplicateConditions.SameEvent,
+        };
+
+        if (!_doAfter.TryStartDoAfter(doAfter))
+            return;
+
+        _popup.PopupClient(Loc.GetString("rmc-hugger-knife-removal-start", ("target", ent.Owner)), args.User, args.User, PopupType.Medium);
+        _popup.PopupEntity(Loc.GetString("rmc-hugger-knife-removal-start-target", ("user", args.User)), args.User, ent, PopupType.MediumCaution);
+    }
+
+    private void OnHuggerKnifeRemovalDoAfterAttempt(Entity<InfectableComponent> ent, ref DoAfterAttemptEvent<HuggerKnifeRemovalDoAfterEvent> args)
+    {
+        if (!ent.Comp.BeingInfected)
+            args.Cancel();
+    }
+
+    private void OnHuggerKnifeRemovalDoAfter(Entity<InfectableComponent> ent, ref HuggerKnifeRemovalDoAfterEvent args)
+    {
+        if (args.Cancelled || args.Handled)
+        {
+            if (args.Cancelled)
+                _popup.PopupClient(Loc.GetString("rmc-hugger-knife-removal-fail"), ent, args.User, PopupType.SmallCaution);
+            return;
+        }
+
+        if (!ent.Comp.BeingInfected)
+            return;
+
+        if (!_net.IsServer)
+            return;
+
+        // Find the hugger in the mask slot
+        if (!_inventory.TryGetSlotEntity(ent, "mask", out var hugger) ||
+            !TryComp(hugger, out XenoParasiteComponent? parasite))
+        {
+            return;
+        }
+
+        args.Handled = true;
+
+        // If the hugger hasn't fallen off yet, infection can be fully prevented
+        var alreadyInfected = HasComp<VictimInfectedComponent>(ent) || parasite.FellOff;
+
+        // Remove the lock so the hugger can be unequipped
+        RemComp<UnremoveableComponent>(hugger.Value);
+        _inventory.TryUnequip(ent, "mask", true, true, true);
+        QueueDel(hugger.Value);
+
+        // Apply a slash wound to represent the risk of knifing near the face
+        _damage.TryChangeDamage(ent, new DamageSpecifier
+        {
+            DamageDict = new Dictionary<string, FixedPoint2> { { "Slash", 10 } }
+        }, true);
+
+        ent.Comp.BeingInfected = false;
+        Dirty(ent);
+
+        var user = args.User;
+        if (!alreadyInfected)
+        {
+            _popup.PopupEntity(Loc.GetString("rmc-hugger-knife-removal-success-no-infect", ("target", ent.Owner)), ent, user, PopupType.Medium);
+            _popup.PopupEntity(Loc.GetString("rmc-hugger-knife-removal-success-no-infect-target"), ent, ent, PopupType.Large);
+        }
+        else
+        {
+            _popup.PopupEntity(Loc.GetString("rmc-hugger-knife-removal-success-already-infected", ("target", ent.Owner)), ent, user, PopupType.Medium);
+            _popup.PopupEntity(Loc.GetString("rmc-hugger-knife-removal-success-already-infected-target"), ent, ent, PopupType.MediumCaution);
+        }
+    }
+
 
     private void OnParasiteLeapHit(Entity<XenoParasiteComponent> parasite, ref XenoLeapHitEvent args)
     {

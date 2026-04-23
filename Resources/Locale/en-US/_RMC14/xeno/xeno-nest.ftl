@@ -11,3 +11,16 @@ cm-xeno-nest-failed-target-resisting = {$target} is resisting, ground them!
 cm-xeno-nest-failed-cant-there = We can't create a nest there!
 cm-xeno-nest-failed-cant-already-there = There is already someone nested there!
 rmc-xeno-nest-failed-dead = This host is dead.
+
+rmc-xeno-nest-escape-start-self = You struggle against the resin bindings...
+rmc-xeno-nest-escape-fail-self = You couldn't break free from the nest.
+rmc-xeno-nest-escape-success-self = You wrench free from the nest!
+rmc-xeno-nest-escape-too-infected = You are too weak to escape!
+
+rmc-xeno-nest-helper-escape-start-self = You begin tearing the resin holding {$target}...
+rmc-xeno-nest-helper-escape-start-target = {$user} begins tearing at the resin holding you!
+rmc-xeno-nest-helper-escape-fail-self = You couldn't pull {$target} free from the nest.
+rmc-xeno-nest-helper-escape-success-self = You pull {$target} free from the nest!
+rmc-xeno-nest-helper-escape-success-target = {$user} pulls you free from the nest!
+
+rmc-xeno-nest-escape-xeno-alert = One of your nests has been disturbed!
