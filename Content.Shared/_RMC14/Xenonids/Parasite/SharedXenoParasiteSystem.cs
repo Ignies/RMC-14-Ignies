@@ -192,7 +192,7 @@ public abstract partial class SharedXenoParasiteSystem : EntitySystem
         if (!_doAfter.TryStartDoAfter(doAfter))
             return;
 
-        _popup.PopupClient(Loc.GetString("rmc-hugger-knife-removal-start", ("target", ent.Owner)), ent, args.User, PopupType.Medium);
+        _popup.PopupClient(Loc.GetString("rmc-hugger-knife-removal-start", ("target", ent.Owner)), args.User, args.User, PopupType.Medium);
         _popup.PopupEntity(Loc.GetString("rmc-hugger-knife-removal-start-target", ("user", args.User)), args.User, ent, PopupType.MediumCaution);
     }
 

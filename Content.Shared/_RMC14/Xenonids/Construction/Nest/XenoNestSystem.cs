@@ -617,15 +617,7 @@ public sealed class XenoNestSystem : EntitySystem
         args.Handled = true;
 
         if (_net.IsServer)
-        {
-            foreach (var session in Filter.PvsExcept(ent.Owner).Recipients)
-            {
-                if (session.AttachedEntity is not { } recipient || !HasComp<XenoComponent>(recipient))
-                    continue;
-
-                _popup.PopupEntity(Loc.GetString("rmc-xeno-nest-escape-xeno-alert"), ent.Owner, recipient, PopupType.SmallCaution);
-            }
-        }
+            NotifyNearbyXenosNestDisturbed(ent.Owner);
 
         _popup.PopupEntity(Loc.GetString("rmc-xeno-nest-escape-success-self"), ent, ent, PopupType.Medium);
         DetachNested(null, ent);
@@ -653,7 +645,7 @@ public sealed class XenoNestSystem : EntitySystem
         if (!_doAfter.TryStartDoAfter(doAfter))
             return;
 
-        _popup.PopupClient(Loc.GetString("rmc-xeno-nest-helper-escape-start-self", ("target", ent.Owner)), ent.Owner, user, PopupType.Medium);
+        _popup.PopupClient(Loc.GetString("rmc-xeno-nest-helper-escape-start-self", ("target", ent.Owner)), user, user, PopupType.Medium);
         _popup.PopupEntity(Loc.GetString("rmc-xeno-nest-helper-escape-start-target", ("user", user)), user, ent.Owner, PopupType.Medium);
     }
 
@@ -676,25 +668,28 @@ public sealed class XenoNestSystem : EntitySystem
 
         var user = args.User;
 
-        _popup.PopupClient(Loc.GetString("rmc-xeno-nest-helper-escape-success-self", ("target", ent.Owner)), ent.Owner, user, PopupType.Medium);
+        _popup.PopupClient(Loc.GetString("rmc-xeno-nest-helper-escape-success-self", ("target", ent.Owner)), user, user, PopupType.Medium);
         _popup.PopupEntity(Loc.GetString("rmc-xeno-nest-helper-escape-success-target", ("user", user)), user, ent.Owner, PopupType.Medium);
 
         if (_net.IsServer)
-        {
-            foreach (var session in Filter.PvsExcept(ent.Owner).Recipients)
-            {
-                if (session.AttachedEntity is not { } recipient ||
-                    recipient == user ||
-                    !HasComp<XenoComponent>(recipient))
-                {
-                    continue;
-                }
-
-                _popup.PopupEntity(Loc.GetString("rmc-xeno-nest-escape-xeno-alert"), ent.Owner, recipient, PopupType.SmallCaution);
-            }
-        }
+            NotifyNearbyXenosNestDisturbed(ent.Owner, user);
 
         DetachNested(null, ent);
+    }
+
+    private void NotifyNearbyXenosNestDisturbed(EntityUid nestedEntity, EntityUid? excludePlayer = null)
+    {
+        foreach (var session in Filter.PvsExcept(nestedEntity).Recipients)
+        {
+            if (session.AttachedEntity is not { } recipient ||
+                recipient == excludePlayer ||
+                !HasComp<XenoComponent>(recipient))
+            {
+                continue;
+            }
+
+            _popup.PopupEntity(Loc.GetString("rmc-xeno-nest-escape-xeno-alert"), nestedEntity, recipient, PopupType.SmallCaution);
+        }
     }
 
     private void DetachNested(EntityUid? nest, EntityUid? nestedNullable)
